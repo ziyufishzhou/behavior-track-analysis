@@ -1,226 +1,477 @@
+"""
+TCT (Three-Chamber Test) ROI 标注工具
+- 画一个大矩形（4点），再点 2 条竖线分割出 3 个区域
+- 自动分割为 3 个区域：左/中/右
+- 用户为每个区域命名 + 选 group（control/center/experiment）
+"""
 import os
+import sys
 import json
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from dataclasses import dataclass, asdict
 from typing import List
 import cv2
+import numpy as np
 from PIL import Image, ImageTk
 
-# ===================== 数据结构 =====================
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from config.paths import TCT_ROI_JSON
+from gui.roi_styles import (
+    BG_DARK, BG_PANEL, BG_TOOLBAR, BG_INPUT, BG_CARD,
+    FG_PRIMARY, FG_SECONDARY, FG_DIM,
+    ACCENT_BLUE, ACCENT_GREEN, ACCENT_ORANGE, ACCENT_RED, ACCENT_TEAL, ACCENT_YELLOW,
+    make_btn, make_toolbar, make_info_label, make_side_panel,
+    make_section, make_treeview, make_help_box, apply_dark_theme, color_for_group,
+)
+
+GROUP_COLORS = {
+    'control':    ACCENT_RED,
+    'center':     ACCENT_BLUE,
+    'experiment': ACCENT_GREEN,
+}
+
+GROUP_LABELS = {
+    'control':    '对照侧',
+    'center':     '中间箱',
+    'experiment': '实验侧',
+}
+
+
 @dataclass
-class ROIRegion:
+class ROIPolygon:
     name: str
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+    points: list
+    group: str
 
-    def normalize(self):
-        """确保坐标顺序正确"""
-        self.x1, self.x2 = sorted([self.x1, self.x2])
-        self.y1, self.y2 = sorted([self.y1, self.y2])
 
-# ===================== 主程序 =====================
+class RegionNameDialog(tk.Toplevel):
+    """为 3 个区域命名 + 选 group"""
+
+    def __init__(self, parent, regions_info):
+        super().__init__(parent)
+        self.title("命名区域")
+        self.configure(bg=BG_DARK)
+        self.resizable(False, False)
+        self.grab_set()
+        self.result = None
+
+        frame = tk.Frame(self, bg=BG_DARK, padx=20, pady=16)
+        frame.pack()
+
+        tk.Label(frame, text="为每个区域命名并选择分组",
+                 bg=BG_DARK, fg=FG_PRIMARY,
+                 font=('Segoe UI', 11, 'bold')).grid(row=0, column=0, columnspan=3, pady=(0, 12))
+
+        self.vars = []
+        for i, (default_name, default_group) in enumerate(regions_info):
+            row = i + 1
+            color = GROUP_COLORS.get(default_group, FG_PRIMARY)
+            tk.Label(frame, text=f"区域 {i+1}", bg=BG_DARK, fg=color,
+                     font=('Segoe UI', 9, 'bold'), width=5, anchor='e').grid(
+                row=row, column=0, pady=4, padx=(0, 8))
+            name_var = tk.StringVar(value=default_name)
+            tk.Entry(frame, textvariable=name_var, width=14, bg=BG_INPUT, fg=FG_PRIMARY,
+                     font=('Segoe UI', 9), relief='flat', bd=0, insertbackground=FG_PRIMARY).grid(
+                row=row, column=1, padx=(0, 6), pady=4)
+            group_var = tk.StringVar(value=default_group)
+            ttk.Combobox(frame, textvariable=group_var,
+                         values=['control', 'center', 'experiment'], state='readonly', width=10).grid(
+                row=row, column=2, pady=4)
+            self.vars.append((name_var, group_var))
+
+        btn_frame = tk.Frame(frame, bg=BG_DARK)
+        btn_frame.grid(row=len(regions_info) + 1, column=0, columnspan=3, pady=(16, 0))
+        make_btn(btn_frame, "确 定", self._ok, accent='green', width=10).pack(side=tk.LEFT, padx=6)
+        make_btn(btn_frame, "取 消", self._cancel, accent='red', width=10).pack(side=tk.LEFT, padx=6)
+
+        self.bind('<Return>', lambda e: self._ok())
+        self.bind('<Escape>', lambda e: self._cancel())
+        self.transient(parent)
+        self.wait_visibility()
+        x = parent.winfo_rootx() + parent.winfo_width() // 2 - self.winfo_width() // 2
+        y = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
+        self.geometry(f"+{x}+{y}")
+
+    def _ok(self):
+        result = []
+        for name_var, group_var in self.vars:
+            name = name_var.get().strip()
+            group = group_var.get()
+            if not name:
+                messagebox.showwarning("提示", "请填写所有区域名称", parent=self)
+                return
+            result.append((name, group))
+        self.result = result
+        self.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.destroy()
+
+
+def three_chamber_split(rect, line1_x, line2_x):
+    """大矩形 + 2 条竖线 → 3 个区域"""
+    x1, y1, x2, y2 = rect
+    lx, rx = sorted([line1_x, line2_x])
+
+    if lx <= x1 or rx >= x2 or lx >= rx:
+        raise ValueError("两条竖线必须在大矩形内部，请重新标注")
+
+    return [
+        ('left',   'control',    [[x1, y1], [lx, y1], [lx, y2], [x1, y2]]),
+        ('center', 'center',     [[lx, y1], [rx, y1], [rx, y2], [lx, y2]]),
+        ('right',  'experiment', [[rx, y1], [x2, y1], [x2, y2], [rx, y2]]),
+    ]
+
+
 class TCTAnnotator(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("TCT 三箱社交实验标注工具 - 自动对齐版")
+        self.title("TCT 三箱 ROI 标注工具")
         self.geometry("1400x900")
-        
+        apply_dark_theme(self)
+
         self.video_path = None
         self.pil_img = None
         self.tk_img = None
-        self.regions: List[ROIRegion] = []
-        
+        self.regions: List[ROIPolygon] = []
+
         self._scale = 1.0
-        self._start_xy = None
-        self._temp_rect_id = None
+        self._draw_step = 0          # 0=空闲, 1=画矩形(4点), 2=点竖线1, 3=点竖线2
+        self._click_points = []
+        self._point_ids = []
+        self._line_ids = []
+        self._big_rect = None        # (x1, y1, x2, y2)
 
         self._setup_ui()
+        if TCT_ROI_JSON.exists():
+            self._load_existing_json()
 
     def _setup_ui(self):
-        # 顶部控制栏
-        top = tk.Frame(self, pady=8, bg="#2c3e50")
-        top.pack(side=tk.TOP, fill=tk.X)
+        toolbar = make_toolbar(self)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        tk.Button(top, text="📂 加载视频", command=self.load_video, width=12, bg="#ecf0f1").pack(side=tk.LEFT, padx=10)
-        tk.Button(top, text="⚡ 自动生成中间箱", command=self.auto_generate_center, bg="#f1c40f", font=('Arial', 9, 'bold')).pack(side=tk.LEFT, padx=10)
-        tk.Button(top, text="💾 保存 JSON", command=self.save_json, bg="#2ecc71", fg="white", width=12).pack(side=tk.LEFT, padx=10)
-        tk.Button(top, text="🗑️ 全部清空", command=self.clear_all, bg="#e74c3c", fg="white").pack(side=tk.LEFT, padx=10)
-        
-        self.info_label = tk.Label(top, text="状态: 请加载视频", fg="white", bg="#2c3e50", font=('Arial', 10))
-        self.info_label.pack(side=tk.LEFT, padx=20)
+        make_btn(toolbar, "打开视频", self.load_video, accent='blue', width=10).pack(side=tk.LEFT, padx=4)
+        make_btn(toolbar, "画大矩形", lambda: self._start_draw(1), accent='teal', width=10).pack(side=tk.LEFT, padx=4)
+        make_btn(toolbar, "画分割线", lambda: self._start_draw(2), accent='orange', width=10).pack(side=tk.LEFT, padx=4)
 
-        # 主界面布局
-        main_frame = tk.Frame(self)
-        main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        tk.Frame(toolbar, bg=FG_DIM, width=1).pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=4)
 
-        self.canvas = tk.Canvas(main_frame, bg="#1a1a1a", cursor="cross")
+        make_btn(toolbar, "保存 JSON", self.save_json, accent='green', width=10).pack(side=tk.LEFT, padx=4)
+        make_btn(toolbar, "加载 JSON", self.load_json, accent='orange', width=10).pack(side=tk.LEFT, padx=4)
+        make_btn(toolbar, "清 空", self.clear_all, accent='red', width=8).pack(side=tk.LEFT, padx=4)
+
+        self.info_label = make_info_label(toolbar, "请打开视频 → 画大矩形(4点) → 点2条分割线")
+        self.info_label.pack(side=tk.LEFT, padx=16)
+
+        main = tk.Frame(self, bg=BG_DARK)
+        main.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(main, bg='#11111B', cursor="cross", highlightthickness=0)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # 右侧面板
-        right_panel = tk.Frame(main_frame, width=300, padx=15, bg="#ffffff")
-        right_panel.pack(side=tk.RIGHT, fill=tk.Y)
+        panel = make_side_panel(main, width=310)
+        panel.pack(side=tk.RIGHT, fill=tk.Y)
 
-        tk.Label(right_panel, text="[ 已标注区域 ]", font=('Arial', 11, 'bold'), bg="#ffffff").pack(pady=10)
-        
-        # 列表框
-        self.listbox = tk.Listbox(right_panel, height=20, font=('Consolas', 10))
-        self.listbox.pack(fill=tk.BOTH, expand=False, pady=5)
-        
-        tk.Button(right_panel, text="删除选中 ROI", command=self.delete_selected).pack(fill=tk.X)
+        tk.Label(panel, text="ROI 区域列表", bg=BG_PANEL, fg=FG_PRIMARY,
+                 font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(4, 6))
 
-        # 命名指南
-        guide_box = tk.LabelFrame(right_panel, text=" 命名规则说明 ", padx=10, pady=10, bg="#ffffff", fg="#2980b9")
-        guide_box.pack(fill=tk.X, pady=20)
-        
-        guide_text = (
-            "1. 画左箱命名: 1_L\n"
-            "2. 画右箱命名: 1_R\n"
-            "3. 点击上方'自动生成'\n\n"
-            "※ 支持 1_L, 2_L, 3_L...\n"
-            "※ 生成后中间箱命名为 1_Center"
-        )
-        tk.Label(guide_box, text=guide_text, justify="left", bg="#ffffff", font=('微软雅黑', 9)).pack()
+        tree_frame, self.tree = make_treeview(
+            panel, columns=('name', 'group'), headings=('名称', '分组'), height=12)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 事件绑定
-        self.canvas.bind("<Button-1>", self.on_mousedown)
-        self.canvas.bind("<B1-Motion>", self.on_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.on_mouseup)
+        self.tree.tag_configure('control',    foreground=ACCENT_RED)
+        self.tree.tag_configure('center',     foreground=ACCENT_BLUE)
+        self.tree.tag_configure('experiment', foreground=ACCENT_GREEN)
+
+        btn_row = tk.Frame(panel, bg=BG_PANEL)
+        btn_row.pack(fill=tk.X, pady=6)
+        make_btn(btn_row, "编辑选中", self.edit_selected, accent='blue', width=10).pack(side=tk.LEFT, padx=(0, 4))
+        make_btn(btn_row, "删除选中", self.delete_selected, accent='red', width=10).pack(side=tk.LEFT)
+
+        make_help_box(panel,
+            "1. 打开视频\n"
+            "2. 点击「画大矩形」→ 点击 4 个角点\n"
+            "   (框住整个三箱区域)\n"
+            "3. 点击「画分割线」→ 点击 2 条竖线位置\n"
+            "   (把大矩形分成左/中/右 3 个区域)\n"
+            "4. 弹窗为每个区域命名 + 选分组\n"
+            "5. 右键或 Esc 取消当前标注")
+
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<Button-3>", lambda e: self._cancel_draw())
+        self.bind("<Escape>", lambda e: self._cancel_draw())
         self.bind("<Configure>", lambda e: self.redraw())
+
+    # ============ 画布交互 ============
+
+    def _start_draw(self, step):
+        if self.pil_img is None:
+            messagebox.showwarning("提示", "请先打开视频"); return
+        self._draw_step = step
+        self._click_points = []
+        self._clear_temp_marks()
+        if step == 1:
+            self.info_label.config(text="点击 4 个角点画大矩形...", fg=ACCENT_TEAL)
+        elif step == 2:
+            if self._big_rect is None:
+                messagebox.showwarning("提示", "请先画大矩形")
+                self._draw_step = 0; return
+            self.info_label.config(text="点击第 1 条竖分割线位置...", fg=ACCENT_ORANGE)
+
+    def _cancel_draw(self):
+        self._draw_step = 0
+        self._click_points = []
+        self._clear_temp_marks()
+        self.info_label.config(text="已取消", fg=FG_SECONDARY)
+        self.redraw()
+
+    def _clear_temp_marks(self):
+        for pid in self._point_ids: self.canvas.delete(pid)
+        for lid in self._line_ids: self.canvas.delete(lid)
+        self._point_ids = []
+        self._line_ids = []
+
+    def on_canvas_click(self, event):
+        if self._draw_step == 0 or self.pil_img is None: return
+
+        ox, oy = event.x / self._scale, event.y / self._scale
+        self._click_points.append((ox, oy))
+
+        r = 5
+        pid = self.canvas.create_oval(event.x-r, event.y-r, event.x+r, event.y+r,
+                                       fill=ACCENT_YELLOW, outline='white', width=1)
+        self._point_ids.append(pid)
+
+        if len(self._click_points) >= 2:
+            prev = self._click_points[-2]
+            px, py = prev[0]*self._scale, prev[1]*self._scale
+            lid = self.canvas.create_line(px, py, event.x, event.y,
+                                          fill=ACCENT_YELLOW, width=2, dash=(4, 4))
+            self._line_ids.append(lid)
+
+        # 大矩形：4 点完成
+        if self._draw_step == 1 and len(self._click_points) == 4:
+            self._finish_rect()
+
+        # 分割线：2 个点
+        elif self._draw_step >= 2 and len(self._click_points) == 1:
+            if self._draw_step == 2:
+                self._line1_x = ox
+                self.info_label.config(text="点击第 2 条竖分割线位置...", fg=ACCENT_ORANGE)
+                # 画竖线预览
+                by1, by2 = self._big_rect[1], self._big_rect[3]
+                lid = self.canvas.create_line(event.x, by1*self._scale, event.x, by2*self._scale,
+                                              fill=ACCENT_ORANGE, width=2, dash=(6, 3))
+                self._line_ids.append(lid)
+                self._draw_step = 3  # 等待第 2 条线
+            elif self._draw_step == 3:
+                self._line2_x = ox
+                self._finish_split()
+
+    def _finish_rect(self):
+        pts = self._click_points[:4]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        self._big_rect = (min(xs), min(ys), max(xs), max(ys))
+        self._click_points = []
+        self._clear_temp_marks()
+        w, h = max(xs)-min(xs), max(ys)-min(ys)
+        self.info_label.config(text=f"矩形完成 ({w:.0f}×{h:.0f}px) → 画分割线", fg=ACCENT_BLUE)
+        self.redraw()
+        bx1, by1, bx2, by2 = self._big_rect
+        self.canvas.create_rectangle(bx1*self._scale, by1*self._scale, bx2*self._scale, by2*self._scale,
+                                     outline=ACCENT_TEAL, width=2)
+
+    def _finish_split(self):
+        try:
+            regions_info = three_chamber_split(self._big_rect, self._line1_x, self._line2_x)
+        except ValueError as ex:
+            messagebox.showerror("错误", str(ex))
+            self.redraw(); return
+
+        self._click_points = []
+        self._clear_temp_marks()
+
+        dlg = RegionNameDialog(self, [(n, g) for n, g, _ in regions_info])
+        self.wait_window(dlg)
+        if dlg.result is None:
+            self.redraw(); return
+
+        self.regions = []
+        for (name, group), (_, _, points) in zip(dlg.result, regions_info):
+            self.regions.append(ROIPolygon(
+                name=name,
+                points=[[round(x, 1), round(y, 1)] for x, y in points],
+                group=group))
+        self._sync_tree()
+        self.info_label.config(text=f"已分割 {len(self.regions)} 个区域", fg=ACCENT_GREEN)
+        self.redraw()
+
+    # ============ 视频加载 / 绘图 ============
 
     def load_video(self):
         path = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.avi *.mkv *.mov")])
         if not path: return
         cap = cv2.VideoCapture(path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 50) # 跳过开头可能的不稳定帧
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 50)
         success, frame = cap.read()
         cap.release()
         if success:
             self.video_path = path
             self.pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            self.info_label.config(text=f"当前视频: {os.path.basename(path)}", fg="#2ecc71")
+            self.info_label.config(text="视频已加载 → 画大矩形 → 画分割线", fg=ACCENT_BLUE)
             self.redraw()
 
     def redraw(self):
         if self.pil_img is None: return
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if cw < 10: cw, ch = 1000, 700
+        if cw < 10: cw, ch = 900, 650
         iw, ih = self.pil_img.size
         self._scale = min(cw/iw, ch/ih)
-        nw, nh = int(iw * self._scale), int(ih * self._scale)
-        
-        resized = self.pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
-        self.tk_img = ImageTk.PhotoImage(resized)
-        
+        nw, nh = int(iw*self._scale), int(ih*self._scale)
+        self.tk_img = ImageTk.PhotoImage(self.pil_img.resize((nw, nh), Image.Resampling.LANCZOS))
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
-        
+
         for r in self.regions:
-            name_low = r.name.lower()
-            # 颜色逻辑：左红，右绿，中蓝
-            color = "#e74c3c" if "_l" in name_low else ("#2ecc71" if "_r" in name_low else "#3498db")
-            
-            x1, y1, x2, y2 = r.x1*self._scale, r.y1*self._scale, r.x2*self._scale, r.y2*self._scale
-            self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=2)
-            self.canvas.create_text(x1, y1-5, text=r.name, fill=color, anchor="sw", font=('Arial', 10, 'bold'))
+            color = GROUP_COLORS.get(r.group, FG_PRIMARY)
+            scaled_pts = []
+            for px, py in r.points:
+                scaled_pts.extend([px*self._scale, py*self._scale])
+            self.canvas.create_polygon(scaled_pts, outline=color, fill='', width=2)
+            cx = sum(p[0] for p in r.points) / 4 * self._scale
+            cy = min(p[1] for p in r.points) * self._scale - 8
+            self.canvas.create_text(cx, cy, text=r.name, fill=color, anchor="s",
+                                    font=('Segoe UI', 9, 'bold'))
 
-    def auto_generate_center(self):
-        """根据已有的 _L 和 _R 自动闭合中间区域"""
-        groups = {}
+    # ============ 区域管理 ============
+
+    def _sync_tree(self):
+        for item in self.tree.get_children(): self.tree.delete(item)
         for r in self.regions:
-            if "_" in r.name:
-                prefix = r.name.split('_')[0]
-                if prefix not in groups: groups[prefix] = []
-                groups[prefix].append(r)
-
-        new_centers = []
-        for prefix, members in groups.items():
-            l_roi = next((m for m in members if m.name.lower().endswith('_l')), None)
-            r_roi = next((m for m in members if m.name.lower().endswith('_r')), None)
-
-            if l_roi and r_roi:
-                # 核心逻辑：取 L 的右边缘到 R 的左边缘
-                cx1, cx2 = l_roi.x2, r_roi.x1
-                # 纵向取平均值以对齐
-                cy1 = (l_roi.y1 + r_roi.y1) // 2
-                cy2 = (l_roi.y2 + r_roi.y2) // 2
-                
-                center_name = f"{prefix}_Center"
-                # 移除旧的同名中心区
-                self.regions = [r for r in self.regions if r.name != center_name]
-                
-                new_roi = ROIRegion(name=center_name, x1=cx1, y1=cy1, x2=cx2, y2=cy2)
-                new_roi.normalize()
-                new_centers.append(new_roi)
-
-        if new_centers:
-            self.regions.extend(new_centers)
-            self._sync_listbox()
-            self.redraw()
-            messagebox.showinfo("完成", f"已成功生成 {len(new_centers)} 个中间箱区域。")
-        else:
-            messagebox.showwarning("失败", "未找到匹配的 L/R 命名对。请确保命名如 '1_L' 和 '1_R'。")
-
-    def on_mousedown(self, e):
-        if self.pil_img is None: return
-        self._start_xy = (e.x, e.y)
-        self._temp_rect_id = self.canvas.create_rectangle(e.x, e.y, e.x, e.y, outline="white", dash=(4,4))
-
-    def on_drag(self, e):
-        if self._start_xy:
-            self.canvas.coords(self._temp_rect_id, self._start_xy[0], self._start_xy[1], e.x, e.y)
-
-    def on_mouseup(self, e):
-        if not self._start_xy: return
-        name = simpledialog.askstring("区域命名", "格式: 序号_L 或 序号_R (如 1_L):")
-        if name:
-            x1, y1 = [int(v / self._scale) for v in self._start_xy]
-            x2, y2 = [int(v / self._scale) for v in (e.x, e.y)]
-            new_roi = ROIRegion(name=name.strip(), x1=x1, y1=y1, x2=x2, y2=y2)
-            new_roi.normalize()
-            self.regions.append(new_roi)
-            self._sync_listbox()
-        
-        if self._temp_rect_id:
-            self.canvas.delete(self._temp_rect_id)
-        self._start_xy = None
-        self.redraw()
-
-    def _sync_listbox(self):
-        self.listbox.delete(0, tk.END)
-        # 排序让列表更整齐
-        self.regions.sort(key=lambda x: x.name)
-        for r in self.regions:
-            self.listbox.insert(tk.END, r.name)
+            gl = GROUP_LABELS.get(r.group, r.group)
+            self.tree.insert('', 'end', values=(r.name, gl), tags=(r.group,))
 
     def delete_selected(self):
-        sel = self.listbox.curselection()
-        if sel:
-            name_to_del = self.listbox.get(sel[0])
-            self.regions = [r for r in self.regions if r.name != name_to_del]
-            self._sync_listbox()
-            self.redraw()
+        sel = self.tree.selection()
+        if not sel: return
+        self.regions.pop(self.tree.index(sel[0]))
+        self._sync_tree(); self.redraw()
+
+    def edit_selected(self):
+        sel = self.tree.selection()
+        if not sel: return
+        idx = self.tree.index(sel[0])
+        r = self.regions[idx]
+
+        dlg = tk.Toplevel(self)
+        dlg.title("编辑区域")
+        dlg.configure(bg=BG_DARK)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        frame = tk.Frame(dlg, bg=BG_DARK, padx=20, pady=16)
+        frame.pack()
+
+        tk.Label(frame, text="名称:", bg=BG_DARK, fg=FG_SECONDARY,
+                 font=('Segoe UI', 9)).grid(row=0, column=0, sticky='e', pady=6, padx=(0, 8))
+        name_var = tk.StringVar(value=r.name)
+        tk.Entry(frame, textvariable=name_var, width=16, bg=BG_INPUT, fg=FG_PRIMARY,
+                 font=('Segoe UI', 9), relief='flat', insertbackground=FG_PRIMARY).grid(
+            row=0, column=1, pady=6)
+
+        tk.Label(frame, text="分组:", bg=BG_DARK, fg=FG_SECONDARY,
+                 font=('Segoe UI', 9)).grid(row=1, column=0, sticky='e', pady=6, padx=(0, 8))
+        group_var = tk.StringVar(value=r.group)
+        ttk.Combobox(frame, textvariable=group_var,
+                     values=['control', 'center', 'experiment'], state='readonly', width=14).grid(
+            row=1, column=1, pady=6)
+
+        result = [None]
+        def _ok():
+            result[0] = (name_var.get().strip(), group_var.get()); dlg.destroy()
+        def _cancel():
+            dlg.destroy()
+
+        btn_f = tk.Frame(frame, bg=BG_DARK)
+        btn_f.grid(row=2, column=0, columnspan=2, pady=(12, 0))
+        make_btn(btn_f, "确 定", _ok, accent='green', width=8).pack(side=tk.LEFT, padx=6)
+        make_btn(btn_f, "取 消", _cancel, accent='red', width=8).pack(side=tk.LEFT, padx=6)
+
+        dlg.transient(self)
+        dlg.wait_window()
+
+        if result[0]:
+            name, group = result[0]
+            self.regions[idx] = ROIPolygon(name=name, points=r.points, group=group)
+            self._sync_tree(); self.redraw()
 
     def clear_all(self):
-        if messagebox.askyesno("确认", "确定清空所有标注？"):
+        if messagebox.askyesno("确认", "清空所有 ROI 吗？"):
             self.regions = []
-            self._sync_listbox()
-            self.redraw()
+            self._big_rect = None
+            self._sync_tree(); self.redraw()
+            self.info_label.config(text="请画大矩形 → 画分割线", fg=FG_SECONDARY)
+
+    # ============ 保存 / 加载 ============
 
     def save_json(self):
-        if not self.regions: return
-        path = filedialog.asksaveasfilename(defaultextension=".json", initialfile="TCT_ROI_Config.json")
+        if not self.regions:
+            messagebox.showwarning("提示", "没有标注区域"); return
+        default_path = str(TCT_ROI_JSON)
+        path = filedialog.asksaveasfilename(defaultextension=".json",
+                                            initialfile=os.path.basename(default_path),
+                                            initialdir=os.path.dirname(default_path))
         if path:
             output = {
-                "video_source": self.video_path,
-                "total_regions": len(self.regions),
-                "regions": [asdict(r) for r in self.regions]
+                "video": self.video_path or "",
+                "big_rect": list(self._big_rect) if self._big_rect else None,
+                "regions": [asdict(r) for r in self.regions],
             }
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump(output, f, indent=4, ensure_ascii=False)
-            messagebox.showinfo("成功", "ROI 配置文件已保存。")
+                json.dump(output, f, indent=2, ensure_ascii=False)
+            messagebox.showinfo("成功", f"JSON 已保存:\n{path}")
+
+    def load_json(self):
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")],
+                                          initialdir=str(TCT_ROI_JSON.parent) if TCT_ROI_JSON.parent.exists() else ".")
+        if not path: return
+        try:
+            with open(path, 'r', encoding='utf-8') as f: data = json.load(f)
+            self._apply_json_data(data)
+            messagebox.showinfo("成功", f"已加载 {len(self.regions)} 个区域")
+        except Exception as e:
+            messagebox.showerror("错误", f"加载失败: {e}")
+
+    def _load_existing_json(self):
+        try:
+            with open(str(TCT_ROI_JSON), 'r', encoding='utf-8') as f: data = json.load(f)
+            self._apply_json_data(data)
+            self.info_label.config(text=f"已加载: {TCT_ROI_JSON.name} ({len(self.regions)} 区域)", fg=ACCENT_GREEN)
+        except Exception: pass
+
+    def _apply_json_data(self, data):
+        self.regions = []
+        for r in data.get('regions', []):
+            if 'points' in r and 'group' in r:
+                self.regions.append(ROIPolygon(name=r['name'], points=r['points'], group=r['group']))
+            elif 'x1' in r:
+                group = 'control' if '_l' in r['name'].lower() else (
+                    'experiment' if '_r' in r['name'].lower() else 'center')
+                self.regions.append(ROIPolygon(
+                    name=r['name'],
+                    points=[[r['x1'], r['y1']], [r['x2'], r['y1']],
+                            [r['x2'], r['y2']], [r['x1'], r['y2']]],
+                    group=group))
+        if data.get('video'): self.video_path = data['video']
+        if data.get('big_rect'): self._big_rect = tuple(data['big_rect'])
+        self._sync_tree()
+        if self.pil_img: self.redraw()
+
 
 if __name__ == "__main__":
     TCTAnnotator().mainloop()
