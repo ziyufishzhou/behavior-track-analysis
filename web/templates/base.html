@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>行为分析工作台</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div id="app">
+  <!-- 侧边栏 -->
+  <aside id="sidebar">
+    <div id="sidebar-title">
+      <div class="title-main">行为分析</div>
+      <div class="title-sub">Behavior Analysis</div>
+    </div>
+    <nav id="nav-list">
+      <a class="nav-item active" data-page="page-status">项目状态</a>
+      <a class="nav-item" data-page="page-import">导入视频</a>
+      <a class="nav-item" data-page="page-dlc">DLC 分析</a>
+      <a class="nav-item" data-page="page-preprocess">预处理</a>
+      <a class="nav-item" data-page="page-roi">ROI 标注</a>
+      <a class="nav-item" data-page="page-analyze">数据分析</a>
+      <a class="nav-item" data-page="page-plot">绘图设置</a>
+      <a class="nav-item" data-page="page-metadata">元数据编辑</a>
+    </nav>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main id="content">
+    <div id="page-container">
+
+      <!-- 项目状态 -->
+      <section id="page-status" class="page active">
+        <h2 class="page-title">项目状态</h2>
+        <div class="toolbar">
+          <button class="btn accent" id="status-refresh">刷新状态</button>
+        </div>
+        <div class="status-grid">
+          <div class="panel status-card">
+            <h3>视频目录</h3>
+            <div class="status-line"><span>路径</span><strong id="status-video-path">--</strong></div>
+            <div class="status-line"><span>视频数量</span><strong id="status-video-count">--</strong></div>
+          </div>
+          <div class="panel status-card">
+            <h3>DLC 环境</h3>
+            <div class="status-line"><span>Python</span><strong id="status-dlc-python">--</strong></div>
+            <div class="status-line"><span>状态</span><strong id="status-dlc-state">--</strong></div>
+          </div>
+          <div class="panel status-card">
+            <h3>CSV 数据</h3>
+            <div class="status-line"><span>原始 CSV</span><strong id="status-csv-raw">--</strong></div>
+            <div class="status-line"><span>修复 CSV</span><strong id="status-csv-fixed">--</strong></div>
+            <div class="status-line"><span>分组 CSV</span><strong id="status-csv-grouped">--</strong></div>
+          </div>
+          <div class="panel status-card">
+            <h3>元数据</h3>
+            <div class="status-line"><span>文件</span><strong id="status-meta-file">--</strong></div>
+            <div class="status-line"><span>记录数</span><strong id="status-meta-rows">--</strong></div>
+          </div>
+          <div class="panel status-card">
+            <h3>ROI 标注</h3>
+            <div class="status-line"><span>OF</span><strong id="status-roi-of">--</strong></div>
+            <div class="status-line"><span>EPM</span><strong id="status-roi-epm">--</strong></div>
+            <div class="status-line"><span>TCT</span><strong id="status-roi-tct">--</strong></div>
+          </div>
+          <div class="panel status-card">
+            <h3>分析结果</h3>
+            <div class="status-line"><span>OF</span><strong id="status-summary-of">--</strong></div>
+            <div class="status-line"><span>EPM</span><strong id="status-summary-epm">--</strong></div>
+            <div class="status-line"><span>TCT</span><strong id="status-summary-tct">--</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 导入视频 -->
+      <section id="page-import" class="page">
+        <h2 class="page-title">导入视频并设置标签</h2>
+        <div class="group-box">
+          <h3>视频根目录</h3>
+          <div class="form-row">
+            <input type="text" id="import-video-dir" placeholder="选择或输入视频所在文件夹，例如 E:\data\videos">
+            <button class="btn accent" id="import-video-dir-save">保存路径</button>
+          </div>
+          <p class="desc" id="import-video-dir-status">默认使用项目内 video/ 目录。</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn accent" id="import-refresh">刷新视频列表</button>
+          <button class="btn danger" id="import-clear">清空选中</button>
+          <input type="file" id="import-upload-input" accept="video/*" multiple style="color:var(--text)">
+          <button class="btn accent" id="import-upload">上传视频</button>
+        </div>
+        <div class="two-col">
+          <div class="panel left">
+            <h3>视频列表</h3>
+            <ul id="import-video-list"></ul>
+          </div>
+          <div class="panel right">
+            <h3>标签设置</h3>
+            <div class="form-row"><label>实验:</label><input type="text" id="import-exp" placeholder="如 OF, EPM, TCT" list="import-exp-list"><datalist id="import-exp-list"><option value="OF"><option value="EPM"><option value="TCT"></datalist></div>
+            <div class="form-row"><label>组别:</label><input type="text" id="import-group" placeholder="如 hM4Di, mCherry" list="import-group-list"><datalist id="import-group-list"><option value="hM4Di"><option value="mCherry"></datalist></div>
+            <div class="form-row"><label>条件:</label><input type="text" id="import-cond" placeholder="如 CNO, Saline" list="import-cond-list"><datalist id="import-cond-list"><option value="CNO"><option value="Saline"></datalist></div>
+            <div class="form-row"><label>小鼠:</label><input type="text" id="import-mouse" placeholder="自动从文件名提取"></div>
+            <div class="form-row" id="import-phase-row" style="display:none"><label>阶段:</label><select id="import-phase"><option>S</option><option>N</option><option>H</option></select></div>
+            <button class="btn success" id="import-apply">应用标签到选中</button>
+            <button class="btn success" id="import-save">保存并分组</button>
+          </div>
+        </div>
+        <h3>预览表</h3>
+        <table id="import-preview"><thead><tr><th>文件名</th><th>实验</th><th>组别</th><th>条件</th><th>小鼠</th><th>阶段</th></tr></thead><tbody></tbody></table>
+      </section>
+
+      <!-- DLC 分析 -->
+      <section id="page-dlc" class="page">
+        <h2 class="page-title">DeepLabCut 视频分析</h2>
+        <div class="group-box">
+          <h3>模型路径</h3>
+          <div class="form-row"><input type="text" id="dlc-model" placeholder="自动检测或手动输入模型目录"><button class="btn" id="dlc-model-browse">选择</button></div>
+        </div>
+        <div class="group-box">
+          <h3>DLC Python</h3>
+          <div class="form-row">
+            <input type="text" id="dlc-python" placeholder="DLC 环境中的 python.exe，例如 conda envs/dlc/python.exe">
+            <button class="btn accent" id="dlc-python-save">保存路径</button>
+          </div>
+          <p class="desc" id="dlc-python-status">用于运行 DeepLabCut。未配置时不能执行 DLC 分析。</p>
+        </div>
+        <div class="group-box">
+          <h3>参数</h3>
+          <div class="form-row"><label>Shuffle:</label><input type="number" id="dlc-shuffle" value="1" min="1" max="100"></div>
+        </div>
+        <div class="group-box">
+          <h3>待分析视频 <span id="dlc-video-count" style="color:var(--subtext0);font-weight:normal"></span></h3>
+          <p class="desc" id="dlc-video-dir-status">点击视频可选中（高亮），不选中则分析全部。视频来自当前配置的视频根目录。</p>
+          <div class="toolbar"><button class="btn" id="dlc-refresh">刷新列表</button></div>
+          <ul id="dlc-video-list" style="max-height:300px"></ul>
+        </div>
+        <button class="btn success" id="dlc-run">开始 DLC 分析</button>
+      </section>
+
+      <!-- 预处理 -->
+      <section id="page-preprocess" class="page">
+        <h2 class="page-title">CSV 预处理</h2>
+        <p class="desc flow-tip">流程：DLC 分析 → 收集 CSV → 修复 CSV → 按标签分组 → ROI 标注 → 数据分析 → 绘图</p>
+        <div class="toolbar">
+          <input type="checkbox" id="preprocess-update" checked>
+          <label for="preprocess-update">更新模式（保留已有 metadata 标签）</label>
+          <button class="btn success" id="preprocess-all">运行完整预处理</button>
+        </div>
+        <div class="group-box">
+          <h3>收集 CSV</h3>
+          <p class="desc">从当前配置的视频根目录递归查找 DeepLabCut 生成的 CSV，并整理到 data/raw_csv。</p>
+          <div class="step-row"><span class="status" id="preprocess-collect-status">就绪</span><button class="btn accent" id="preprocess-collect-run">运行</button></div>
+        </div>
+        <div class="group-box">
+          <h3>修复 CSV</h3>
+          <p class="desc">修复 DLC 输出的 CSV 文件（需要先完成 DLC 分析）</p>
+          <div class="step-row"><span class="status" id="preprocess-fix-status">就绪</span><button class="btn accent" id="preprocess-fix-run">运行</button></div>
+        </div>
+        <div class="group-box">
+          <h3>按标签分组</h3>
+          <p class="desc">根据 data/metadata.xlsx 中的视频标签，把 CSV 复制到 data/grouped 对应目录。</p>
+          <div class="step-row"><span class="status" id="preprocess-group-status">就绪</span><button class="btn accent" id="preprocess-group-run">运行</button></div>
+        </div>
+        <div class="group-box">
+          <h3>生成 metadata</h3>
+          <p class="desc">从 data/grouped 扫描 CSV，生成或更新 data/metadata.xlsx。</p>
+          <div class="step-row"><span class="status" id="preprocess-meta-status">就绪</span><button class="btn accent" id="preprocess-meta-run">运行</button></div>
+        </div>
+      </section>
+
+      <!-- ROI 标注 -->
+      <section id="page-roi" class="page">
+        <h2 class="page-title">ROI 区域标注</h2>
+        <p class="desc">点击下方按钮启动对应实验的 ROI 标注工具（独立窗口）</p>
+        <div class="group-box">
+          <h3>OF 旷场 ROI 标注</h3>
+          <div class="step-row"><span class="status" id="roi-of-status">--</span><button class="btn accent" id="roi-of-launch">启动标注工具</button></div>
+        </div>
+        <div class="group-box">
+          <h3>EPM 高架十字 ROI</h3>
+          <div class="step-row"><span class="status" id="roi-epm-status">--</span><button class="btn accent" id="roi-epm-launch">启动标注工具</button></div>
+        </div>
+        <div class="group-box">
+          <h3>TCT 三箱 ROI 标注</h3>
+          <div class="step-row"><span class="status" id="roi-tct-status">--</span><button class="btn accent" id="roi-tct-launch">启动标注工具</button></div>
+        </div>
+      </section>
+
+      <!-- 数据分析 -->
+      <section id="page-analyze" class="page">
+        <h2 class="page-title">数据分析</h2>
+        <div class="group-box">
+          <h3>实验选择</h3>
+          <div class="form-row"><input type="checkbox" id="analyze-of" checked><label for="analyze-of">OF 旷场</label><span class="roi-badge" id="analyze-of-roi">--</span></div>
+          <div class="form-row"><input type="checkbox" id="analyze-epm" checked><label for="analyze-epm">EPM 高架十字</label><span class="roi-badge" id="analyze-epm-roi">--</span></div>
+          <div class="form-row"><input type="checkbox" id="analyze-tct" checked><label for="analyze-tct">TCT 三箱</label><span class="roi-badge" id="analyze-tct-roi">--</span></div>
+        </div>
+        <div class="group-box">
+          <h3>参数设置</h3>
+          <div class="form-row"><label>FPS:</label><input type="number" id="analyze-fps" value="30" min="1" max="120"></div>
+          <div class="form-row"><label>置信度阈值:</label><input type="number" id="analyze-like" value="0.6" min="0" max="1" step="0.05"></div>
+          <div class="form-row"><label>分析时长 (分钟):</label><label>OF</label><input type="number" id="analyze-of-time" value="15" min="1" max="60"><label>EPM</label><input type="number" id="analyze-epm-time" value="15" min="1" max="60"><label>TCT</label><input type="number" id="analyze-tct-time" value="10" min="1" max="60"></div>
+        </div>
+        <button class="btn success" id="analyze-run">开始分析</button>
+        <span class="status" id="analyze-status">就绪</span>
+      </section>
+
+      <!-- 绘图设置 -->
+      <section id="page-plot" class="page">
+        <h2 class="page-title">绘图设置 (Prism Style)</h2>
+        <div class="plot-layout">
+          <!-- 左侧配置 -->
+          <div class="plot-config">
+            <!-- 数据源 -->
+            <div class="group-box">
+              <h3>数据源</h3>
+              <div class="form-row"><label>实验:</label><select id="plot-exp"><option>EPM</option><option>OF</option><option>TCT</option></select></div>
+              <div class="form-row"><label>数据文件:</label><input type="text" id="plot-source" placeholder="自动查找或手动输入"><button class="btn" id="plot-auto-find">自动查找</button></div>
+            </div>
+            <!-- 图表类型 -->
+            <div class="group-box">
+              <h3>图表类型</h3>
+              <div class="form-row"><select id="plot-chart-type"><option value="bar">Bar + Scatter (Prism)</option><option value="box">Box + Scatter</option><option value="violin">Violin + Scatter</option><option value="scatter">Scatter</option><option value="paired">Before-After (Paired)</option></select></div>
+            </div>
+            <!-- 统计检验 -->
+            <div class="group-box">
+              <h3>统计检验</h3>
+              <div class="form-row"><label>检验方式:</label><select id="plot-force-test"><option value="">自动 (正态→参数/非参数)</option><option value="paired t-test">配对 t-test</option><option value="wilcoxon">Wilcoxon signed-rank</option><option value="unpaired t-test">非配对 t-test</option><option value="mann-whitney">Mann-Whitney U</option></select></div>
+              <div class="form-row"><label>显著性 α:</label><input type="number" id="plot-alpha" value="0.05" min="0.01" max="0.10" step="0.01"></div>
+            </div>
+            <!-- 颜色方案 -->
+            <div class="group-box">
+              <h3>颜色方案</h3>
+              <div class="form-row"><label>预设:</label><select id="plot-palette"></select></div>
+              <div class="color-grid">
+                <div class="color-item"><label>组 1</label><input type="color" id="plot-color-0" value="#D1D1D1"></div>
+                <div class="color-item"><label>组 2</label><input type="color" id="plot-color-1" value="#4682B4"></div>
+                <div class="color-item"><label>散点</label><input type="color" id="plot-color-scatter" value="#000000"></div>
+                <div class="color-item"><label>连线</label><input type="color" id="plot-color-connect" value="#4D4D4D"></div>
+                <div class="color-item"><label>边框</label><input type="color" id="plot-color-edge" value="#000000"></div>
+              </div>
+            </div>
+            <!-- 参数 -->
+            <div class="group-box">
+              <h3>参数</h3>
+              <div class="form-row"><label>标题:</label><input type="text" id="plot-title" placeholder="留空则自动"></div>
+              <div class="form-row"><label>柱宽:</label><input type="number" id="plot-bar-width" value="0.6" min="0.2" max="1.5" step="0.05"><label>柱间距:</label><input type="number" id="plot-bar-gap" value="0.2" min="0" max="1.0" step="0.05"></div>
+              <div class="form-row"><label>散点大小:</label><input type="number" id="plot-point-size" value="18" min="4" max="60"><label>误差线:</label><select id="plot-errorbar"><option value="sem">SEM</option><option value="sd">SD</option><option value="ci95">95% CI</option></select></div>
+              <div class="form-row"><label>填充透明度:</label><input type="number" id="plot-fill-alpha" value="0.7" min="0.1" max="1.0" step="0.05"><label>边框宽度:</label><input type="number" id="plot-edge-width" value="0.8" min="0.2" max="2.0" step="0.1"></div>
+              <div class="form-row"><label>图宽(mm):</label><input type="number" id="plot-fig-width" value="89" min="40" max="300" step="1"><label>DPI:</label><input type="number" id="plot-dpi" value="300" min="72" max="600" step="50"></div>
+              <div class="form-row"><label>输出:</label><input type="checkbox" id="plot-pdf" checked><label for="plot-pdf">PDF</label><input type="checkbox" id="plot-png" checked><label for="plot-png">PNG预览</label></div>
+            </div>
+            <!-- AI 图表生成 -->
+            <div class="group-box">
+              <h3>AI 图表生成 (Beta)</h3>
+              <p class="desc">上传示例图，AI 分析风格并生成代码。需要 ANTHROPIC_API_KEY 环境变量。</p>
+              <div class="form-row"><label>示例图片:</label><input type="file" id="plot-ai-image" accept="image/*"></div>
+              <button class="btn accent" id="plot-ai-run">AI 生成图表</button>
+            </div>
+            <!-- 操作按钮 -->
+            <div class="toolbar">
+              <button class="btn success" id="plot-generate">生成图表</button>
+              <button class="btn accent" id="plot-open-dir">查看输出</button>
+              <span class="status" id="plot-status">就绪</span>
+            </div>
+          </div>
+          <!-- 右侧预览 -->
+          <div class="plot-preview">
+            <h3>图表预览</h3>
+            <div id="plot-preview-area"><p class="desc">生成图表后将在此显示</p></div>
+            <h3>统计结果</h3>
+            <table id="plot-stats-table"><thead><tr><th>分组</th><th>指标</th><th>检验</th><th>p 值</th><th>显著性</th><th>效应量</th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 元数据编辑 -->
+      <section id="page-metadata" class="page">
+        <h2 class="page-title">元数据编辑</h2>
+        <div class="toolbar">
+          <button class="btn accent" id="meta-rescan">重新扫描</button>
+          <button class="btn success" id="meta-save">保存</button>
+          <input type="checkbox" id="meta-update" checked><label for="meta-update">更新模式 (保留手动列)</label>
+          <label>新列名:</label><input type="text" id="meta-new-col" placeholder="列名"><button class="btn" id="meta-add-col">添加列</button>
+        </div>
+        <div class="table-wrap">
+          <table id="meta-table"><thead></thead><tbody></tbody></table>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- 日志控制台 -->
+    <div id="log-panel">
+      <div id="log-header">
+        <span>Console</span>
+        <div id="progress-bar-wrap">
+          <div id="progress-bar"><div id="progress-fill"></div></div>
+          <span id="progress-text"></span>
+        </div>
+        <button class="btn-sm" id="log-clear">清除</button>
+        <button class="btn-sm" id="log-toggle">折叠</button>
+      </div>
+      <div id="log-console"></div>
+    </div>
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/log-stream.js') }}"></script>
+</body>
+</html>
