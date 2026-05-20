@@ -5,42 +5,43 @@
 工作流：
   1. DLC 分析视频后输出 CSV 到 data/raw_csv/
   2. fix_csv 修复后输出到 data/fixed_csv/
-  3. group_csv 按日期分组到 data/grouped/{OF,EPM,TCT}/
+  3. group_csv 按标签分组到 data/grouped/{OF,EPM,TCT}/
   4. 运行此脚本: python -m preprocessing.build_metadata
      → 自动生成 data/metadata.xlsx
-  5. 打开 Excel 手动补充标签（Sex, Age, Batch 等额外列）
-  6. analyze 脚本运行时自动读取 metadata 合并标签到输出
+  5. 打开 Excel 或在 Web 元数据编辑页手动补充标签
 
 用法：
     python -m preprocessing.build_metadata          # 首次生成
-    python -m preprocessing.build_metadata --update  # 保留手动列，只追加新文件
+    python -m preprocessing.build_metadata --update  # 合并模式：只填充空值，不覆盖已有标签
 """
 import os
+import sys
 import re
 import argparse
 import pandas as pd
+
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from config.paths import GROUPED_DIR, METADATA_FILE
 
 
 # ==================== 标签提取规则 ====================
 
-# Group: 从路径中提取
 GROUP_PATTERNS = [
     (r'hm4di', 'hM4Di'),
     (r'mcherry', 'mCherry'),
 ]
 
-# Condition: 从路径中提取
 CONDITION_PATTERNS = [
     (r'cno', 'CNO'),
     (r'saline', 'Saline'),
     (r'sal', 'Saline'),
 ]
 
-# MouseID: 从文件名提取
 MOUSE_ID_RE = re.compile(r'([a-zA-Z]+\d+(?:-\d+)?)')
 
-# TCT Phase: 从文件名提取
 TCT_PHASE_RE = re.compile(r'\s+([SNH])\s*')
 
 
@@ -125,9 +126,22 @@ def build_metadata(update=False):
 
     if update and METADATA_FILE.exists():
         df_old = pd.read_excel(str(METADATA_FILE))
-        user_cols = [c for c in df_old.columns if c not in df_new.columns and c != 'FilePath']
-        df_merged = df_new.merge(df_old[['FileName'] + user_cols], on='FileName', how='left')
-        df_out = df_merged
+        # 合并：用 FileName 作为 key，只填充 df_old 中为空的字段
+        merged = df_old.copy()
+        for _, new_row in df_new.iterrows():
+            fname = new_row['FileName']
+            mask = merged['FileName'] == fname
+            if mask.any():
+                idx = mask.idxmax()
+                # 只填充空值，不覆盖已有数据
+                for col in ['Experiment', 'Group', 'Condition', 'MouseID', 'Phase']:
+                    if col in merged.columns and col in new_row:
+                        old_val = merged.at[idx, col]
+                        if pd.isna(old_val) or str(old_val).strip() == '':
+                            merged.at[idx, col] = new_row[col]
+            else:
+                merged = pd.concat([merged, pd.DataFrame([new_row])], ignore_index=True)
+        df_out = merged
     else:
         df_out = df_new
 
@@ -143,12 +157,10 @@ def build_metadata(update=False):
 
     print(f"\n已生成: {METADATA_FILE}")
     print(f"共 {len(df_out)} 条记录")
-    print(f"\n你可以打开此 Excel 手动添加额外列（Sex, Age, Batch 等）")
-    print(f"analyze 脚本运行时会自动读取并合并这些标签")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='生成/更新视频标签元数据表')
-    parser.add_argument('--update', action='store_true', help='保留手动列，只追加新文件')
+    parser.add_argument('--update', action='store_true', help='合并模式：只填充空值，不覆盖已有标签')
     args = parser.parse_args()
     build_metadata(update=args.update)

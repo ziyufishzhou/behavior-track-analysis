@@ -1,38 +1,75 @@
+"""Collect DeepLabCut CSV outputs into data/raw_csv."""
 import os
+import sys
 import shutil
-from config.paths import VIDEO_DIR, RAW_CSV_DIR
+from pathlib import Path
 
-# ================= 配置区 =================
-video_root_dir = str(VIDEO_DIR)
-output_summary_dir = str(RAW_CSV_DIR)
-# ==========================================
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
-if not os.path.exists(output_summary_dir):
-    os.makedirs(output_summary_dir)
+from config.paths import RAW_CSV_DIR, get_video_dir
 
-def collect_dlc_csv():
-    print(f"📂 开始从 {video_root_dir} 提取 CSV 结果...")
-    count = 0
 
-    for root, dirs, files in os.walk(video_root_dir):
-        for file in files:
-            # 识别 DLC 生成的 csv (通常带有 DLC_resnet... 等字样)
-            if file.endswith(".csv") and "DLC" in file:
-                source_path = os.path.join(root, file)
+def dlc_csv_to_result_name(csv_path: Path) -> str:
+    """Convert a DLC output name to the normalized *_result.csv name."""
+    stem = csv_path.stem
+    if "DLC" in stem:
+        stem = stem.split("DLC", 1)[0]
+    stem = stem.rstrip("_- ")
+    return f"{stem}_result.csv"
 
-                # 构造一个简洁的目标文件名：保留原始视频名，去掉那一长串模型后缀
-                # 比如：mouse01DLC_Resnet50...csv -> mouse01_result.csv
-                video_name = file.split("DLC")[0]
-                new_filename = f"{video_name}_result.csv"
-                dest_path = os.path.join(output_summary_dir, new_filename)
 
-                # 执行复制
-                shutil.copy2(source_path, dest_path)
-                print(f"✅ 已提取: {new_filename}")
-                count += 1
+def collect_dlc_csv(video_root: Path | None = None, output_dir: Path = RAW_CSV_DIR) -> int:
+    """Copy DLC CSV files from the video tree to raw_csv and return copied count."""
+    video_root = Path(video_root) if video_root is not None else get_video_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[收集CSV] 从 {video_root} 递归查找 DLC CSV...")
 
-    print(f"\n✨ 提取完成！共找到 {count} 个结果文件。")
-    print(f"📍 汇总路径: {output_summary_dir}")
+    if not video_root.exists():
+        print(f"[ERROR] 视频目录不存在: {video_root}")
+        return 0
+
+    csv_files = sorted(
+        p for p in video_root.rglob("*.csv")
+        if p.is_file() and "DLC" in p.name and output_dir not in p.parents
+    )
+
+    if not csv_files:
+        print("[收集CSV] 未找到 DLC CSV 文件")
+        return 0
+
+    copied = 0
+    used_dest_names = set()
+    for i, src in enumerate(csv_files, 1):
+        dest_name = dlc_csv_to_result_name(src)
+        dest = output_dir / dest_name
+
+        # Multiple source files in one run can normalize to the same name; only
+        # then add a suffix. Across different runs, overwrite the same target so
+        # repeated collection remains idempotent.
+        if dest_name in used_dest_names:
+            suffix = 2
+            while True:
+                alt_name = f"{Path(dest_name).stem}_{suffix}.csv"
+                if alt_name not in used_dest_names:
+                    dest = output_dir / alt_name
+                    dest_name = alt_name
+                    break
+                suffix += 1
+
+        shutil.copy2(src, dest)
+        used_dest_names.add(dest_name)
+        copied += 1
+        print(f"[PROGRESS] {i}/{len(csv_files)} {src.name} -> {dest.name}")
+
+    print(f"[收集CSV] 完成，共复制 {copied} 个文件到 {output_dir}")
+    return copied
+
+
+def main():
+    collect_dlc_csv()
+
 
 if __name__ == "__main__":
-    collect_dlc_csv()
+    main()
