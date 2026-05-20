@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      .title { font-family: "Microsoft YaHei", "SimHei", sans-serif; font-size: 32px; font-weight: 700; fill: #111827; }
+      .layer-title { font-family: "Microsoft YaHei", "SimHei", sans-serif; font-size: 24px; font-weight: 700; fill: #111827; }
+      .text { font-family: "Microsoft YaHei", "SimSun", sans-serif; font-size: 20px; fill: #1f2937; }
+      .small { font-family: "Microsoft YaHei", "SimSun", sans-serif; font-size: 17px; fill: #475569; }
+      .box { rx: 8; ry: 8; stroke-width: 2; }
+      .arrow { stroke: #334155; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="760" fill="#ffffff"/>
+  <text x="600" y="54" text-anchor="middle" class="title">基于 DeepLabCut 的啮齿动物行为分析系统总体架构</text>
+
+  <rect x="70" y="95" width="1060" height="105" fill="#eef6ff" stroke="#2563eb" class="box"/>
+  <text x="105" y="137" class="layer-title">交互层</text>
+  <rect x="245" y="118" width="220" height="58" fill="#ffffff" stroke="#60a5fa" class="box"/>
+  <text x="355" y="154" text-anchor="middle" class="text">Flask Web 工作台</text>
+  <rect x="500" y="118" width="200" height="58" fill="#ffffff" stroke="#60a5fa" class="box"/>
+  <text x="600" y="154" text-anchor="middle" class="text">Tkinter 桌面界面</text>
+  <rect x="735" y="118" width="200" height="58" fill="#ffffff" stroke="#60a5fa" class="box"/>
+  <text x="835" y="154" text-anchor="middle" class="text">PyQt 辅助界面</text>
+
+  <rect x="70" y="230" width="1060" height="105" fill="#f0fdf4" stroke="#16a34a" class="box"/>
+  <text x="105" y="272" class="layer-title">绘图层</text>
+  <rect x="245" y="253" width="220" height="58" fill="#ffffff" stroke="#4ade80" class="box"/>
+  <text x="355" y="289" text-anchor="middle" class="text">统计绘图</text>
+  <rect x="500" y="253" width="200" height="58" fill="#ffffff" stroke="#4ade80" class="box"/>
+  <text x="600" y="289" text-anchor="middle" class="text">显著性标注</text>
+  <rect x="735" y="253" width="200" height="58" fill="#ffffff" stroke="#4ade80" class="box"/>
+  <text x="835" y="289" text-anchor="middle" class="text">论文图导出</text>
+
+  <rect x="70" y="365" width="1060" height="118" fill="#fff7ed" stroke="#ea580c" class="box"/>
+  <text x="105" y="411" class="layer-title">分析层</text>
+  <rect x="245" y="390" width="220" height="66" fill="#ffffff" stroke="#fb923c" class="box"/>
+  <text x="355" y="417" text-anchor="middle" class="text">OF 旷场实验</text>
+  <text x="355" y="443" text-anchor="middle" class="small">距离、中心区时间</text>
+  <rect x="500" y="390" width="220" height="66" fill="#ffffff" stroke="#fb923c" class="box"/>
+  <text x="610" y="417" text-anchor="middle" class="text">EPM 高架十字迷宫</text>
+  <text x="610" y="443" text-anchor="middle" class="small">开放臂时间、进入次数</text>
+  <rect x="755" y="390" width="220" height="66" fill="#ffffff" stroke="#fb923c" class="box"/>
+  <text x="865" y="417" text-anchor="middle" class="text">TCT 三箱社交实验</text>
+  <text x="865" y="443" text-anchor="middle" class="small">探索时间、偏好指数</text>
+
+  <rect x="70" y="515" width="1060" height="112" fill="#faf5ff" stroke="#9333ea" class="box"/>
+  <text x="105" y="560" class="layer-title">处理层</text>
+  <rect x="220" y="540" width="180" height="60" fill="#ffffff" stroke="#c084fc" class="box"/>
+  <text x="310" y="576" text-anchor="middle" class="text">collect_csv</text>
+  <rect x="430" y="540" width="160" height="60" fill="#ffffff" stroke="#c084fc" class="box"/>
+  <text x="510" y="576" text-anchor="middle" class="text">fix_csv</text>
+  <rect x="620" y="540" width="170" height="60" fill="#ffffff" stroke="#c084fc" class="box"/>
+  <text x="705" y="576" text-anchor="middle" class="text">group_csv</text>
+  <rect x="820" y="540" width="190" height="60" fill="#ffffff" stroke="#c084fc" class="box"/>
+  <text x="915" y="576" text-anchor="middle" class="text">metadata 管理</text>
+
+  <rect x="70" y="660" width="1060" height="70" fill="#f8fafc" stroke="#64748b" class="box"/>
+  <text x="105" y="704" class="layer-title">数据层</text>
+  <text x="300" y="703" text-anchor="middle" class="text">video 原始视频</text>
+  <text x="505" y="703" text-anchor="middle" class="text">data CSV / ROI / metadata</text>
+  <text x="745" y="703" text-anchor="middle" class="text">models DLC 模型</text>
+  <text x="965" y="703" text-anchor="middle" class="text">output 图表与结果</text>
+
+  <path d="M600 660 L600 630" class="arrow"/>
+  <path d="M600 515 L600 486" class="arrow"/>
+  <path d="M600 365 L600 338" class="arrow"/>
+  <path d="M600 230 L600 203" class="arrow"/>
+
+  <path d="M1020 180 C1080 230,1080 570,1018 650" stroke="#64748b" stroke-width="2.2" fill="none" marker-end="url(#arrow)" stroke-dasharray="8 7"/>
+  <text x="1082" y="415" text-anchor="middle" transform="rotate(90 1082 415)" class="small">用户配置与结果反馈</text>
+</svg>
